@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mailbox Messenger</title>
+    <!-- WebSocket Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <!-- Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* --- ЦВЕТОВЫЕ ПЕРЕМЕННЫЕ --- */
+        :root {
+            /* Базовый акцентный цвет (можно менять в настройках) */
+            --primary: #4A6FFF; 
+            
+            /* Light Theme */
+            --bg-main: #FFFFFF;
+            --bg-chat: #F3F4F6;
+            --bg-panel: #FFFFFF;
+            --text-main: #111827;
+            --text-muted: #6B7280;
+            --msg-in: #FFFFFF;
+            --msg-out: var(--primary);
+            --text-out: #FFFFFF;
+            --border: #E5E7EB;
+            --online: #22C55E;
+            --danger: #EF4444;
+            --overlay: rgba(0, 0, 0, 0.4);
+            --shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        [data-theme="dark"] {
+            /* Dark Theme */
+            --bg-main: #0F172A;
+            --bg-chat: #0B1120;
+            --bg-panel: #1E293B;
+            --text-main: #F9FAFB;
+            --text-muted: #9CA3AF;
+            --msg-in: #1F2937;
+            --border: #334155;
+            --overlay: rgba(0, 0, 0, 0.7);
+            --shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+
+        /* --- БАЗОВЫЕ СТИЛИ --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; transition: background-color 0.3s, border-color 0.3s; }
+        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); overflow: hidden; }
+        button { cursor: pointer; border: none; background: none; color: inherit; }
+        ul { list-style: none; }
+
+        /* --- ЛЕВАЯ ПАНЕЛЬ --- */
+        .sidebar { width: 350px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+        .sidebar-header { padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+        
+        /* Поиск */
+        .search-container { flex: 1; position: relative; }
+        .search-container i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+        .search-container input { width: 100%; padding: 10px 10px 10px 35px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg-chat); color: var(--text-main); outline: none; transition: 0.2s; }
+        .search-container input:focus { border-color: var(--primary); }
+
+        .settings-btn { font-size: 20px; color: var(--text-muted); transition: 0.2s; padding: 5px; }
+        .settings-btn:hover { color: var(--primary); transform: rotate(45deg); }
+
+        .chat-list { flex: 1; overflow-y: auto; }
+        .chat-item { display: flex; align-items: center; padding: 12px 20px; cursor: pointer; transition: 0.2s; }
+        .chat-item:hover { background-color: var(--bg-chat); }
+        .chat-item.active { background-color: var(--primary); color: white; }
+        .chat-item.active .text-muted { color: rgba(255,255,255,0.8); }
+        
+        .avatar { width: 48px; height: 48px; border-radius: 50%; background-color: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 15px; position: relative; flex-shrink: 0; }
+        .chat-item.active .avatar { background-color: white; color: var(--primary); }
+
+        .chat-info { flex: 1; overflow: hidden; }
+        .chat-info h4 { margin-bottom: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .chat-info p { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .text-muted { color: var(--text-muted); }
+
+        /* --- ПРАВАЯ ПАНЕЛЬ (Чат) --- */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background-color: var(--bg-chat); position: relative; }
+        .chat-header { padding: 10px 20px; background-color: var(--bg-panel); border-bottom: 1px solid var(--border); box-shadow: var(--shadow); display: flex; justify-content: space-between; align-items: center; z-index: 5; }
+        
+        .user-status-container h3 { font-size: 16px; margin-bottom: 2px; }
+        .user-status { font-size: 13px; color: var(--primary); transition: color 0.3s; }
+        .user-status.offline { color: var(--text-muted); }
+
+        .messages-container { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { max-width: 65%; display: flex; flex-direction: column; animation: fadeIn 0.3s ease; }
+        .message.incoming { align-self: flex-start; }
+        .message.outgoing { align-self: flex-end; }
+        
+        .bubble { padding: 10px 15px; border-radius: 18px; font-size: 15px; line-height: 1.4; word-wrap: break-word; box-shadow: var(--shadow); position: relative; }
+        .incoming .bubble { background-color: var(--msg-in); color: var(--text-main); border-bottom-left-radius: 4px; }
+        .outgoing .bubble { background-color: var(--primary); color: var(--text-out); border-bottom-right-radius: 4px; }
+        .msg-time { font-size: 11px; opacity: 0.7; margin-top: 4px; align-self: flex-end; }
+
+        /* Ввод сообщения */
+        .input-area { padding: 15px 20px; background-color: var(--bg-panel); border-top: 1px solid var(--border); display: flex; gap: 12px; align-items: center; }
+        .media-btn { font-size: 22px; color: var(--text-muted); transition: 0.2s; cursor: pointer; }
+        .media-btn:hover { color: var(--primary); }
+        
+        .input-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
+        .input-wrapper input { width: 100%; padding: 12px 15px; border: 1px solid var(--border); border-radius: 24px; background-color: var(--bg-chat); color: var(--text-main); outline: none; font-size: 15px; }
+        .input-wrapper input:focus { border-color: var(--primary); }
+
+        .btn-send { background-color: var(--primary); color: white; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: var(--shadow); overflow: hidden; position: relative; }
+        
+        /* Анимация бумажного самолетика */
+        .btn-send i { transition: transform 0.3s ease, opacity 0.3s ease; }
+        .btn-send.animating i { animation: flyOut 0.5s ease forwards; }
+
+        @keyframes flyOut {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            40% { transform: translate(20px, -20px) scale(0.5); opacity: 0; }
+            50% { transform: translate(-20px, 20px) scale(0.1); opacity: 0; }
+            100% { transform: translate(0, 0) scale(1); opacity: 1; }
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* --- МОДАЛЬНЫЕ ОКНА --- */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--overlay); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: 0.3s; }
+        .modal-overlay.active { opacity: 1; visibility: visible; }
+        .modal { background: var(--bg-panel); width: 400px; max-width: 90%; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); transition: 0.3s; }
+        .modal-overlay.active .modal { transform: scale(1); }
+        
+        .modal-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 18px; }
+        .modal-close { font-size: 20px; color: var(--text-muted); cursor: pointer; }
+        .modal-close:hover { color: var(--danger); }
+        .modal-body { padding: 20px; }
+
+        /* Модалка логина */
+        .login-input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-chat); color: var(--text-main); outline: none; margin-bottom: 15px; font-size: 16px; }
+        .login-input:focus { border-color: var(--primary); }
+        .btn-primary { width: 100%; padding: 12px; background: var(--primary); color: white; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-primary:hover { opacity: 0.9; }
+
+        /* Модалка настроек (Вкладки) */
+        .tabs { display: flex; border-bottom: 1px solid var(--border); }
+        .tab { flex: 1; padding: 15px; text-align: center; cursor: pointer; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: 0.2s; }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s; }
+
+        /* Переключатели (Toggles iOS style) */
+        .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .setting-item:last-child { border-bottom: none; }
+        
+        .toggle-switch { position: relative; width: 44px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--text-muted); transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* Палитра цветов */
+        .color-picker { display: flex; gap: 15px; margin-top: 10px; }
+        .color-dot { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
+        .color-dot.active { border-color: var(--text-main); transform: scale(1.1); }
+
+        /* Скрытый инпут для файлов */
+        #file-input { display: none; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Всплывающее окно для ввода имени -->
+    <div id="login-modal" class="modal-overlay active">
+        <div class="modal">
+            <div class="modal-header">Добро пожаловать</div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px; font-size: 14px; color: var(--text-muted);">Пожалуйста, представьтесь, чтобы начать общение.</p>
+                <input type="text" id="username-input" class="login-input" placeholder="Ваше имя..." onkeypress="if(event.key==='Enter') saveUsername()">
+                <button class="btn-primary" onclick="saveUsername()">Войти в чат</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Всплывающее окно Настроек -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                Настройки
+                <i class="fas fa-times modal-close" onclick="closeSettings()"></i>
+            </div>
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('appearance')"><i class="fas fa-paint-brush"></i> Оформление</div>
+                <div class="tab" onclick="switchTab('privacy')"><i class="fas fa-shield-alt"></i> Конфиденциальность</div>
+            </div>
+            <div class="modal-body">
+                
+                <!-- Вкладка Оформления -->
+                <div id="tab-appearance" class="tab-content active">
+                    <div class="setting-item">
+                        <span>Тёмная тема</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="theme-toggle" onchange="toggleTheme()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item" style="display: block;">
+                        <span style="display: block; margin-bottom: 10px;">Цвет интерфейса</span>
+                        <div class="color-picker">
+                            <div class="color-dot active" style="background: #4A6FFF;" onclick="setPrimaryColor('#4A6FFF', this)"></div>
+                            <div class="color-dot" style="background: #8B5CF6;" onclick="setPrimaryColor('#8B5CF6', this)"></div>
+                            <div class="color-dot" style="background: #10B981;" onclick="setPrimaryColor('#10B981', this)"></div>
+                            <div class="color-dot" style="background: #F43F5E;" onclick="setPrimaryColor('#F43F5E', this)"></div>
+                            <div class="color-dot" style="background: #F59E0B;" onclick="setPrimaryColor('#F59E0B', this)"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Вкладка Конфиденциальности -->
+                <div id="tab-privacy" class="tab-content">
+                    <div class="setting-item">
+                        <span>Показывать статус "В сети"</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="privacy-online" checked onchange="updatePrivacy()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span>Отчеты о прочтении (✓✓)</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span>Анти-удаление сообщений</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span>Кто может мне писать</span>
+                        <span class="text-muted" style="font-size: 13px; cursor: pointer;">Все <i class="fas fa-chevron-right"></i></span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Основной интерфейс -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <button class="settings-btn" onclick="openSettings()" title="Настройки">
+                <i class="fas fa-cog"></i>
+            </button>
+            <div class="search-container">
+                <i class="fas fa-search"></i>
+                <input type="text" placeholder="Поиск чатов...">
+            </div>
+        </div>
+        
+        <div class="chat-list">
+            <!-- Активный чат -->
+            <div class="chat-item active">
+                <div class="avatar">О</div>
+                <div class="chat-info">
+                    <h4>Общий чат</h4>
+                    <p class="text-muted" id="last-msg-preview">Добро пожаловать!</p>
+                </div>
+            </div>
+            <!-- Для дизайна -->
+            <div class="chat-item">
+                <div class="avatar" style="background:#8B5CF6">Д</div>
+                <div class="chat-info">
+                    <h4>Дизайн отдел</h4>
+                    <p class="text-muted">Макеты готовы?</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="chat-area">
+        <header class="chat-header">
+            <div style="display: flex; align-items: center;">
+                <div class="avatar" style="width: 42px; height: 42px;"><i class="fas fa-users"></i></div>
+                <div class="user-status-container">
+                    <h3>Общий чат</h3>
+                    <div class="user-status" id="activity-status">В сети</div>
+                </div>
+            </div>
+            <button class="settings-btn" title="Поиск по чату"><i class="fas fa-search"></i></button>
+        </header>
+
+        <div class="messages-container" id="messageArea">
+            <!-- Сообщения появятся здесь -->
+        </div>
+
+        <div class="input-area">
+            <!-- Прикрепление файлов -->
+            <button class="media-btn" onclick="document.getElementById('file-input').click()" title="Прикрепить фото/видео">
+                <i class="fas fa-paperclip"></i>
+            </button>
+            <input type="file" id="file-input" accept="image/*, video/*" onchange="sendMedia(this)">
+
+            <div class="input-wrapper">
+                <input type="text" id="message" placeholder="Написать сообщение..." onkeypress="handleKeyPress(event)" autocomplete="off" />
+            </div>
+
+            <!-- Голосовое сообщение -->
+            <button class="media-btn" id="mic-btn" onclick="sendVoice()" title="Записать голосовое">
+                <i class="fas fa-microphone"></i>
+            </button>
+
+            <!-- Кнопка отправки (с анимацией) -->
+            <button class="btn-send" id="send-btn" onclick="sendMessage()">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </main>
+
+    <!-- ЛОГИКА (JS) -->
+    <script>
+        let currentUser = "";
+        let stompClient = null;
+        const messageArea = document.getElementById('messageArea');
+        const sendBtn = document.getElementById('send-btn');
+        const msgInput = document.getElementById('message');
+        const activityStatus = document.getElementById('activity-status');
+
+        // --- ИНИЦИАЛИЗАЦИЯ (Имя пользователя) ---
+        function saveUsername() {
+            const input = document.getElementById('username-input').value.trim();
+            if(input.length > 0) {
+                currentUser = input;
+                document.getElementById('login-modal').classList.remove('active');
+                connectWebSocket(); // Подключаемся только после ввода имени
+            } else {
+                alert("Имя не может быть пустым!");
+            }
+        }
+
+        // --- ВЕБСОКЕТЫ (Из твоего исходника + мок) ---
+        function connectWebSocket() {
+            try {
+                var socket = new SockJS('/ws-chat');
+                stompClient = Stomp.over(socket);
+                stompClient.debug = null; // убираем лишний лог
+
+                stompClient.connect({}, function (frame) {
+                    stompClient.subscribe('/topic/public', function (payload) {
+                        onMessageReceived(JSON.parse(payload.body));
+                    });
+                }, function(err) {
+                    console.log("WebSocket backend not found. Running in UI-only Mock mode.");
+                });
+            } catch(e) {
+                console.log("SockJS not initialized. Mock mode.");
+            }
+        }
+
+        // --- ОТПРАВКА СООБЩЕНИЙ ---
+        function sendMessage() {
+            var content = msgInput.value.trim();
+            if(content) {
+                playSendAnimation();
+                
+                var chatMessage = { sender: currentUser, content: content };
+                
+                // Если бекенд работает - шлем туда, иначе рендерим локально для демо-дизайна
+                if(stompClient && stompClient.connected) {
+                    stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+                } else {
+                    onMessageReceived(chatMessage); // Демо-режим (эхо)
+                }
+                msgInput.value = '';
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === "Enter") sendMessage();
+        }
+
+        // Анимация улетающего самолетика
+        function playSendAnimation() {
+            sendBtn.classList.remove('animating');
+            void sendBtn.offsetWidth; // trigger reflow
+            sendBtn.classList.add('animating');
+            setTimeout(() => sendBtn.classList.remove('animating'), 500);
+        }
+
+        // Отрисовка сообщения
+        function onMessageReceived(msg) {
+            const isOutgoing = (msg.sender === currentUser);
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+            const msgDiv = document.createElement("div");
+            msgDiv.classList.add("message", isOutgoing ? "outgoing" : "incoming");
+
+            let senderHtml = isOutgoing ? "" : `<div style="font-size: 12px; color: var(--primary); margin-bottom: 4px; font-weight: bold;">${msg.sender}</div>`;
+            
+            msgDiv.innerHTML = `
+                <div class="bubble">
+                    ${senderHtml}
+                    ${msg.content}
+                    <div class="msg-time">${time}</div>
+                </div>
+            `;
+
+            messageArea.appendChild(msgDiv);
+            messageArea.scrollTop = messageArea.scrollHeight; // автоскролл
+
+            // Обновляем превью слева
+            document.getElementById('last-msg-preview').innerText = (isOutgoing ? "Вы: " : "") + msg.content;
+        }
+
+        // --- МЕДИА ФУНКЦИИ (Фото/Видео/Голос) ---
+        function sendMedia(input) {
+            if(input.files && input.files[0]) {
+                const fileType = input.files[0].type.includes('video') ? '🎬 Видео' : '📷 Фотография';
+                msgInput.value = `[Отправлено ${fileType}: ${input.files[0].name}]`;
+                sendMessage();
+                input.value = ''; // сброс
+            }
+        }
+
+        function sendVoice() {
+            const micIcon = document.querySelector('#mic-btn i');
+            micIcon.classList.remove('fa-microphone');
+            micIcon.classList.add('fa-stop-circle');
+            micIcon.style.color = "var(--danger)";
+            
+            msgInput.placeholder = "Запись аудио... (нажмите стоп)";
+            msgInput.disabled = true;
+
+            // Имитация записи 2 секунды
+            setTimeout(() => {
+                micIcon.classList.remove('fa-stop-circle');
+                micIcon.classList.add('fa-microphone');
+                micIcon.style.color = "var(--text-muted)";
+                msgInput.disabled = false;
+                msgInput.placeholder = "Написать сообщение...";
+                
+                msgInput.value = "🎤 Голосовое сообщение (0:02)";
+                sendMessage();
+            }, 2000);
+        }
+
+        // --- НАСТРОЙКИ И МОДАЛКИ ---
+        function openSettings() { document.getElementById('settings-modal').classList.add('active'); }
+        function closeSettings() { document.getElementById('settings-modal').classList.remove('active'); }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            event.currentTarget.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+        }
+
+        // Темы и Цвета
+        function toggleTheme() {
+            const isDark = document.getElementById('theme-toggle').checked;
+            if(isDark) document.body.setAttribute('data-theme', 'dark');
+            else document.body.removeAttribute('data-theme');
+        }
+
+        function setPrimaryColor(hex, element) {
+            document.documentElement.style.setProperty('--primary', hex);
+            document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+            element.classList.add('active');
+        }
+
+        // Конфиденциальность
+        function updatePrivacy() {
+            const showOnline = document.getElementById('privacy-online').checked;
+            if(showOnline) {
+                activityStatus.innerText = "В сети";
+                activityStatus.classList.remove('offline');
+            } else {
+                activityStatus.innerText = "Был(а) недавно";
+                activityStatus.classList.add('offline');
+            }
+        }
+    </script>
+</body>
+</html>
