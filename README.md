@@ -22,7 +22,7 @@ Controller → Service → Repository → Database
 * **Service** — business logic
 * **Repository** — database access
 * **Frontend** — server-side rendered HTML
-* 
+
 ## 🛠️ Tech Stack
 
 ### Backend
