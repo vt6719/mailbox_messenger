@@ -22,15 +22,7 @@ Controller → Service → Repository → Database
 * **Service** — business logic
 * **Repository** — database access
 * **Frontend** — server-side rendered HTML
-
-## ✨ Features
-
-* 💬 Send and receive messages
-* 👤 User authentication (login/register)
-* 📜 Message history
-* 🌐 Web interface (HTML templates)
-* ⚡ Fast backend powered by Spring Boot
-
+* 
 ## 🛠️ Tech Stack
 
 ### Backend
